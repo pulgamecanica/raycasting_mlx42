@@ -7,9 +7,17 @@
 #include "map.h"
 #include "raycast.h"
 #include "gui.h"
+#include "gui_paged_grid.h"
 
 #define WIDTH  800
 #define HEIGHT 600
+
+// REPLACE the GUI-related fields in App with this
+// (remove test_button and test_animation)
+typedef enum State {
+    MENU,
+    GAME,
+} State;
 
 typedef struct {
     mlx_t*   mlx;
@@ -18,13 +26,16 @@ typedef struct {
     Canvas   minimap;  /* off-screen minimap buffer */
     GridMap  map;
     Camera   cam;
+    State    state;
     double   last_time;
 
-    // TESTING GUI
-    GuiContext gui;
-    GuiButton test_button;
-    GuiAnimation test_animation;
+    // GUI
+    GuiContext   gui;
+    GuiPagedGrid grid;
+    mlx_texture_t* ui_item_skin;
+    mlx_texture_t* ui_pager_skin;
 } App;
+
 
 static void on_loop_gui(App *app); // Forward declaration
 
@@ -42,7 +53,10 @@ static void handle_input(App* a, float dt) {
 
     /* strafe vector is dir rotated 90° */
     Vec2f strafe = (Vec2f){ -a->cam.dir.y, a->cam.dir.x };
-
+    if (mlx_is_key_down(a->mlx, MLX_KEY_M)) {
+        a->state = MENU;
+        return ;
+    }
     if (mlx_is_key_down(a->mlx, MLX_KEY_W)) {
         Vec2f n = { a->cam.pos.x + a->cam.dir.x * move, a->cam.pos.y + a->cam.dir.y * move };
         if (!map_is_wall(&a->map, (int)n.x, (int)a->cam.pos.y)) a->cam.pos.x = n.x;
@@ -85,71 +99,78 @@ static void on_loop(void* param) {
     if (dt > 0.05f) dt = 0.05f;             /* clamp to avoid tunneling on stalls */
     a->last_time = now;
 
-    handle_input(a, dt);
+    if (a->state == GAME) {
+        handle_input(a, dt);
 
-    render_scene(&a->scene, &a->map, &a->cam);
-    draw_minimap(&a->minimap, &a->map, &a->cam, 6);
+        render_scene(&a->scene, &a->map, &a->cam);
+        draw_minimap(&a->minimap, &a->map, &a->cam, 6);
 
-    canvas_copy(&a->screen, &a->scene, 0, 0);       /* compose scene */
-    canvas_copy(&a->screen, &a->minimap, 8, 8);     /* overlay minimap */
+        canvas_copy(&a->screen, &a->scene, 0, 0);       /* compose scene */
+        canvas_copy(&a->screen, &a->minimap, 8, 8);     /* overlay minimap */
+    } else {
+        
+    }
 
     on_loop_gui(a);
 }
 
-
-// TESTING GUI
-static void on_click(void* ud) {
-    (void)ud;
-    fprintf(stderr, "Button clicked!\n");
+static void on_select_map(void* ud) {
+    const char* name = (const char*)ud;
+    fprintf(stderr, "Selected map: %s\n", name ? name : "(null)");
 }
 
 static void init_gui(App *app) {
-    app->gui = (GuiContext){ .mlx = app->mlx, .now = 0.0, .paths = NULL, .paths_len = 0};
-    GuiContext *gui_ptr = &app->gui;  // usefull to setup gui elements
+    app->gui = (GuiContext){ .mlx = app->mlx, .now = 0.0, .paths = NULL, .paths_len = 0 };
+    GuiContext *gui_ptr = &app->gui;
+
     gui_paths_add(gui_ptr, "assets");
 
-    {   // test buton init
-        mlx_texture_t* skin = gui_load_png_from_paths(gui_ptr, "button_skin.png");
-        if (!skin) { fprintf(stderr, "Missing button_skin.png\n"); exit(EXIT_FAILURE); }
-        GuiNineSlice nine = { .left=8, .right=8, .top=8, .bottom=8, .center_fill=true, .center_color=0x00124222 };
-        GuiButton *btn_ptr = &app->test_button;
-        if (!gui_button_init(gui_ptr, btn_ptr, 40, 140, 200, 60, skin, nine, "Hello")) {
-            fprintf(stderr, "Error while initializing button\n");
-            exit(EXIT_FAILURE);
-        }
-        btn_ptr->on_click = on_click;
-        gui_button_mount(gui_ptr, btn_ptr);
+    // Load skins (reuse item skin for pager unless you have a different one)
+    app->ui_item_skin  = gui_load_png_from_paths(gui_ptr, "button_skin.png");
+    if (!app->ui_item_skin) { fprintf(stderr, "Missing assets/button_skin.png\n"); exit(EXIT_FAILURE); }
+    app->ui_pager_skin = app->ui_item_skin;
+
+    GuiNineSlice item_nine  = { .left=8, .right=8, .top=8, .bottom=8, .center_fill=false, .center_color=0 };
+    GuiNineSlice pager_nine = { .left=8, .right=8, .top=8, .bottom=8, .center_fill=true,  .center_color=gui_rgba(0,0,0,48) };
+
+    GuiPagedGridConfig cfg = {
+        .x = 0, .y = 0, .w = 640, .h = 420,
+        .center_h = true, .center_v = true,
+        .cols = 3, .rows = 3, .gap = 16, .pager_h = 20,
+        .item_skin_tex = app->ui_item_skin, .item_skin_cfg = item_nine,
+        .pager_skin_tex = app->ui_pager_skin, .pager_skin_cfg = pager_nine,
+    };
+    if (!gui_paged_grid_init(gui_ptr, &app->grid, cfg)) {
+        fprintf(stderr, "gui_paged_grid_init failed\n");
+        exit(EXIT_FAILURE);
     }
 
-    {   // test animation init
-        GuiAnimation *anim_ptr = &app->test_animation;
-        gui_animation_init(anim_ptr, 5.0, gui_ptr->mlx->width - (128 + 42), gui_ptr->mlx->height - (128 + 42));
-        // Replace with your actual frames: frame0.png, frame1.png, ...
-        gui_animation_push_png(gui_ptr, anim_ptr, "fly_frame0.png");
-        gui_animation_push_png(gui_ptr, anim_ptr, "fly_frame1.png");
-        gui_animation_push_png(gui_ptr, anim_ptr, "fly_frame2.png");
-        gui_animation_push_png(gui_ptr, anim_ptr, "fly_frame3.png");
-        if (!gui_animation_mount(gui_ptr, anim_ptr)) {
-            fprintf(stderr, "Error mounting animation\n");
-            exit(EXIT_FAILURE);
-        }
-    }
+    // Three items for now (future: maps)
+    GuiPagedGridItem items[] = {
+        { "Map 1", on_select_map, "Map 1" },
+        { "Map 2", on_select_map, "Map 2" },
+        { "Map 3", on_select_map, "Map 3" },
+        { "Map 4", on_select_map, "Map 4" },
+        { "Map 5", on_select_map, "Map 5" },
+        { "Map 6", on_select_map, "Map 6" },
+    };
+    gui_paged_grid_set_items(&app->grid, items, sizeof(items)/sizeof(items[0]));
+    gui_paged_grid_mount(gui_ptr, &app->grid);
 }
 
 static void on_loop_gui(App *app) {
-    mlx_image_t *canvas = app->screen.img;
-    
-    gui_fill_rect(canvas, 20, 20, 120, 60, gui_rgba(30, 144, 255, 255));
-    gui_draw_rect(canvas, 20, 20, 120, 60, gui_rgba(255, 255, 255, 255));
-    gui_draw_square(canvas, 160, 20, 60, gui_rgba(255, 215, 0, 255));
-    gui_fill_circle(canvas, 260, 50, 30, gui_rgba(220, 20, 60, 255));
-    gui_draw_circle(canvas, 340, 50, 30, gui_rgba(255,255,255,255));
-    gui_fill_triangle(canvas, 420, 80, 470, 20, 520, 80, gui_rgba(46, 204, 113, 255));
-    gui_draw_triangle(canvas, 540, 80, 590, 20, 640, 80, gui_rgba(255,255,255,255));
-
     gui_begin_frame(&app->gui);
-    gui_button_update(&app->gui, &app->test_button);
-    gui_animation_update(&app->gui, &app->test_animation);
+    if (app->state == MENU) {
+        gui_paged_grid_update(&app->gui, &app->grid);
+    }
+}
+
+static void clean_gui(App *app) {
+    gui_paged_grid_free(&app->gui, &app->grid);
+    if (app->ui_item_skin)  mlx_delete_texture(app->ui_item_skin);
+    // if pager uses a different texture, free it too:
+    if (app->ui_pager_skin && app->ui_pager_skin != app->ui_item_skin)
+        mlx_delete_texture(app->ui_pager_skin);
 }
 
 int main(void) {
@@ -172,6 +193,7 @@ int main(void) {
     app.cam.pos   = (Vec2f){ 12.0f, 12.0f };
     app.cam.dir   = (Vec2f){ -1.0f, 0.0f };
     app.cam.plane = (Vec2f){ 0.0f, 0.66f };
+    app.state     = MENU;
 
     /* Canvases */
     if (canvas_init(&app.screen,  mlx, WIDTH, HEIGHT) ||
@@ -190,8 +212,9 @@ int main(void) {
 
     app.last_time = mlx_get_time();
 
-    init_gui(&app); // Testing gui
-
+    /* Setup the GUI */
+    init_gui(&app);
+    
     mlx_loop_hook(mlx, on_loop, &app);
 
 #ifdef WEB
@@ -201,6 +224,7 @@ int main(void) {
     mlx_loop(mlx);
 #endif
 
+    clean_gui(&app);
     canvas_destroy(&app.minimap);
     canvas_destroy(&app.scene);
     canvas_destroy(&app.screen);

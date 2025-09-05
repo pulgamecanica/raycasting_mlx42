@@ -387,6 +387,8 @@ static void render_button(GuiContext* ctx, GuiButton* b) {
         // keep label on top
         if (b->label_img && b->label_img->count > 0) {
             b->label_img->instances[b->label_img->count-1].z += 1;
+            if (cfg.center_fill)
+                mlx_image_to_window(ctx->mlx, b->label_img, b->x + b->label_dx, b->y + b->label_dy);
         }
     }
 }
@@ -396,7 +398,6 @@ void gui_button_mount(GuiContext* ctx, GuiButton* b) {
     int32_t si = -1;
     if (b->skin_img)
         si = mlx_image_to_window(ctx->mlx, b->skin_img, b->x, b->y);
-    // if (b->label_img) mlx_image_to_window(ctx->mlx, b->label_img, b->x + b->label_dx, b->y + b->label_dy);
     if (si >= GUI_MIN_Z_LAYER) b->skin_img->instances[si].z = GUI_MIN_Z_LAYER;
     if (b->label_img && b->label_img->count > 0) {
         size_t li = b->label_img->count - 1;
