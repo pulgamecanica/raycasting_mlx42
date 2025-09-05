@@ -7,12 +7,12 @@ NAME = demo
 # Compiler Settings
 # -----------------------
 CC = cc
-CFLAGS = -O3 -Wall -Wextra -Werror -Iinclude -IMLX42/include
+CFLAGS = -O3 -Wall -Wextra -Werror -Iinclude -IMLX42/include -Iinclude/gui
 
 # -----------------------
 # Sources settings
 # -----------------------
-SRCS = $(wildcard src/*.c)
+SRCS = $(wildcard src/*.c src/gui/*.c)
 OBJS = $(SRCS:.c=.o)
 
 # -----------------------
@@ -52,13 +52,13 @@ web: $(WEB)
 
 $(WEB): $(SRCS) $(MLX_WEB_LIB)
 	mkdir -p web
-	emcc -DWEB -O3 -I include -I MLX42/include -pthread $(SRCS) \
+	emcc -DWEB -O3 -I include -Iinclude/gui -I MLX42/include -pthread $(SRCS) \
 		-o $(WEB) \
 		$(MLX_WEB_LIB) \
 		-s USE_GLFW=3 -s USE_WEBGL2=1 -s FULL_ES3=1 -s WASM=1 \
 		-s NO_EXIT_RUNTIME=1 -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
 		-s ALLOW_MEMORY_GROWTH \
-# 		--preload-file assets
+		--preload-file assets
 
 re: fclean all
 
