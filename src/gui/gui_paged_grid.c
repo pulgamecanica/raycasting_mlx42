@@ -247,6 +247,7 @@ void gui_paged_grid_update(GuiContext* ctx, GuiPagedGrid* g) {
     for (size_t i = 0; i < g->per_page; ++i) {
         if (g->item_btns[i].skin_img || g->item_btns[i].label_img)
             gui_button_update(ctx, &g->item_btns[i]);
+        if (!g || !g->mounted) return; // Selecting item might ivalidate
     }
     // Update pager buttons (disabled ones early-return)
     gui_button_update(ctx, &g->btn_prev);
