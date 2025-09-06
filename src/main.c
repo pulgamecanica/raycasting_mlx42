@@ -14,39 +14,49 @@
 #define WIDTH  800
 #define HEIGHT 600
 
-// REPLACE the GUI-related fields in App with this
-// (remove test_button and test_animation)
+#ifndef LEVELS_DIR
+#define LEVELS_DIR "assets/maps"
+#endif
+
 typedef enum State {
     MENU,
     GAME,
 } State;
 
-// ADD near the top (after typedefs), to carry info into on_select_map:
 typedef struct {
     struct App* app;       // forward use; actual App is below
     size_t index;          // which item in list
     const char* path;      // full file path (owned by App.map_files)
 } MapSelectUD;
 
-typedef struct {
-    mlx_t*   mlx;
+typedef struct Menu {
+    Canvas          screen; /* the ONLY image attached to the window */
+    Canvas          scene;  /* off-screen render target */
+    MenuBg          menu_bg;
+    GuiContext      gui;
+    GuiPagedGrid    grid;
+    mlx_texture_t*  ui_item_skin;
+    mlx_texture_t*  ui_pager_skin;
+} Menu;
+
+
+typedef struct Game {
     Canvas   screen;   /* the ONLY image attached to the window */
     Canvas   scene;    /* off-screen render target */
     Canvas   minimap;  /* off-screen minimap buffer */
-    Canvas   menu;  /* off-screen minimap buffer */
     GridMap  map;
     Camera   cam;
-    State    state;
-    double   last_time;
+} Game;
 
-    // GUI
-    MenuBg menu_bg;
-    GuiContext   gui;
-    GuiPagedGrid grid;
-    mlx_texture_t* ui_item_skin;
-    mlx_texture_t* ui_pager_skin;
 
-    // Menu Map data
+typedef struct {
+    mlx_t*  mlx;
+    Game*    game;
+    Menu*    menu;
+    State   state;
+    double  last_time;
+    
+    /// Settings
     char** map_files; // levels
     size_t map_file_count;
 
@@ -58,7 +68,10 @@ typedef struct {
 
 static void init_menu_bg(App* app);
 static void on_select_map(void* ud); // Forward declare
-static void on_loop_gui(App *app); // Forward declaration
+static void on_loop_gui(App *app);   // Forward declare
+static void on_resize(int32_t w, int32_t h, void* param);
+static void switch_to_game(App* a);
+static void switch_to_menu(App* a);
 
 #ifdef WEB
 # include <emscripten.h>
@@ -66,51 +79,90 @@ static mlx_t* g_mlx = NULL; /* WEB needs this for emscripten main loop */
 static void emscripten_main_loop(void) { mlx_loop(g_mlx); }
 #endif
 
-static void handle_input(App* a, float dt) {
+static void handle_general_input(App* a, float dt) {
+    (void)dt;
     if (mlx_is_key_down(a->mlx, MLX_KEY_ESCAPE)) mlx_close_window(a->mlx);
+}
 
+static void handle_game_input(App* a, float dt) {
     float move = 3.0f * dt;      /* tiles per second */
     float rot  = 2.0f * dt;      /* radians per second */
 
     /* strafe vector is dir rotated 90° */
-    Vec2f strafe = (Vec2f){ -a->cam.dir.y, a->cam.dir.x };
+    Vec2f strafe = (Vec2f){ -a->game->cam.dir.y, a->game->cam.dir.x };
     if (mlx_is_key_down(a->mlx, MLX_KEY_M)) {
-        init_menu_bg(a);
-        a->state = MENU;
+        switch_to_menu(a);
         return ;
     }
     if (mlx_is_key_down(a->mlx, MLX_KEY_W)) {
-        Vec2f n = { a->cam.pos.x + a->cam.dir.x * move, a->cam.pos.y + a->cam.dir.y * move };
-        if (!map_is_wall(&a->map, (int)n.x, (int)a->cam.pos.y)) a->cam.pos.x = n.x;
-        if (!map_is_wall(&a->map, (int)a->cam.pos.x, (int)n.y)) a->cam.pos.y = n.y;
+        Vec2f n = { a->game->cam.pos.x + a->game->cam.dir.x * move, a->game->cam.pos.y + a->game->cam.dir.y * move };
+        if (!map_is_wall(&a->game->map, (int)n.x, (int)a->game->cam.pos.y)) a->game->cam.pos.x = n.x;
+        if (!map_is_wall(&a->game->map, (int)a->game->cam.pos.x, (int)n.y)) a->game->cam.pos.y = n.y;
     }
     if (mlx_is_key_down(a->mlx, MLX_KEY_S)) {
-        Vec2f n = { a->cam.pos.x - a->cam.dir.x * move, a->cam.pos.y - a->cam.dir.y * move };
-        if (!map_is_wall(&a->map, (int)n.x, (int)a->cam.pos.y)) a->cam.pos.x = n.x;
-        if (!map_is_wall(&a->map, (int)a->cam.pos.x, (int)n.y)) a->cam.pos.y = n.y;
+        Vec2f n = { a->game->cam.pos.x - a->game->cam.dir.x * move, a->game->cam.pos.y - a->game->cam.dir.y * move };
+        if (!map_is_wall(&a->game->map, (int)n.x, (int)a->game->cam.pos.y)) a->game->cam.pos.x = n.x;
+        if (!map_is_wall(&a->game->map, (int)a->game->cam.pos.x, (int)n.y)) a->game->cam.pos.y = n.y;
     }
     if (mlx_is_key_down(a->mlx, MLX_KEY_A)) {
-        Vec2f n = { a->cam.pos.x - strafe.x * move, a->cam.pos.y - strafe.y * move };
-        if (!map_is_wall(&a->map, (int)n.x, (int)a->cam.pos.y)) a->cam.pos.x = n.x;
-        if (!map_is_wall(&a->map, (int)a->cam.pos.x, (int)n.y)) a->cam.pos.y = n.y;
+        Vec2f n = { a->game->cam.pos.x - strafe.x * move, a->game->cam.pos.y - strafe.y * move };
+        if (!map_is_wall(&a->game->map, (int)n.x, (int)a->game->cam.pos.y)) a->game->cam.pos.x = n.x;
+        if (!map_is_wall(&a->game->map, (int)a->game->cam.pos.x, (int)n.y)) a->game->cam.pos.y = n.y;
     }
     if (mlx_is_key_down(a->mlx, MLX_KEY_D)) {
-        Vec2f n = { a->cam.pos.x + strafe.x * move, a->cam.pos.y + strafe.y * move };
-        if (!map_is_wall(&a->map, (int)n.x, (int)a->cam.pos.y)) a->cam.pos.x = n.x;
-        if (!map_is_wall(&a->map, (int)a->cam.pos.x, (int)n.y)) a->cam.pos.y = n.y;
+        Vec2f n = { a->game->cam.pos.x + strafe.x * move, a->game->cam.pos.y + strafe.y * move };
+        if (!map_is_wall(&a->game->map, (int)n.x, (int)a->game->cam.pos.y)) a->game->cam.pos.x = n.x;
+        if (!map_is_wall(&a->game->map, (int)a->game->cam.pos.x, (int)n.y)) a->game->cam.pos.y = n.y;
     }
     if (mlx_is_key_down(a->mlx, MLX_KEY_LEFT)) {
         float cs = cosf(rot), sn = sinf(rot);
-        Vec2f d = a->cam.dir, p = a->cam.plane;
-        a->cam.dir   = (Vec2f){ d.x*cs - d.y*sn, d.x*sn + d.y*cs };
-        a->cam.plane = (Vec2f){ p.x*cs - p.y*sn, p.x*sn + p.y*cs };
+        Vec2f d = a->game->cam.dir, p = a->game->cam.plane;
+        a->game->cam.dir   = (Vec2f){ d.x*cs - d.y*sn, d.x*sn + d.y*cs };
+        a->game->cam.plane = (Vec2f){ p.x*cs - p.y*sn, p.x*sn + p.y*cs };
     }
     if (mlx_is_key_down(a->mlx, MLX_KEY_RIGHT)) {
         float cs = cosf(-rot), sn = sinf(-rot);
-        Vec2f d = a->cam.dir, p = a->cam.plane;
-        a->cam.dir   = (Vec2f){ d.x*cs - d.y*sn, d.x*sn + d.y*cs };
-        a->cam.plane = (Vec2f){ p.x*cs - p.y*sn, p.x*sn + p.y*cs };
+        Vec2f d = a->game->cam.dir, p = a->game->cam.plane;
+        a->game->cam.dir   = (Vec2f){ d.x*cs - d.y*sn, d.x*sn + d.y*cs };
+        a->game->cam.plane = (Vec2f){ p.x*cs - p.y*sn, p.x*sn + p.y*cs };
     }
+}
+
+static void handle_menu_input(App* a, float dt) {
+    (void)a;
+    (void)dt;
+}
+
+static void handle_input(App* a, float dt) {
+    handle_general_input(a, dt);
+
+    switch (a->state) {
+    case GAME:
+        handle_game_input(a, dt);
+        break;
+
+    case MENU:
+        handle_menu_input(a, dt);
+        break;
+    
+    default:
+        break;
+    }
+}
+
+static void on_game_loop(App* a, double now, float dt) {
+    (void)now;(void)dt;
+    render_scene(&a->game->scene, &a->game->map, &a->game->cam);
+    draw_minimap(&a->game->minimap, &a->game->map, &a->game->cam, 6);
+
+    canvas_copy(&a->game->screen, &a->game->scene, 0, 0);       /* compose scene */
+    canvas_copy(&a->game->screen, &a->game->minimap, 8, 8);     /* overlay minimap */
+}
+
+static void on_menu_loop(App* a, double now, float dt) {
+    menu_bg_update(&a->menu->menu_bg, now, dt);
+    menu_bg_render(&a->menu->menu_bg, a->menu->scene.img);
+    canvas_copy(&a->menu->screen, &a->menu->scene, 0, 0);
 }
 
 static void on_loop(void* param) {
@@ -121,21 +173,21 @@ static void on_loop(void* param) {
     if (dt > 0.05f) dt = 0.05f;             /* clamp to avoid tunneling on stalls */
     a->last_time = now;
 
-    if (a->state == GAME) {
-        handle_input(a, dt);
-
-        render_scene(&a->scene, &a->map, &a->cam);
-        draw_minimap(&a->minimap, &a->map, &a->cam, 6);
-
-        canvas_copy(&a->screen, &a->scene, 0, 0);       /* compose scene */
-        canvas_copy(&a->screen, &a->minimap, 8, 8);     /* overlay minimap */
-    } else {
-        menu_bg_update(&a->menu_bg, now, dt);
-        menu_bg_render(&a->menu_bg, a->menu.img);
-        canvas_copy(&a->screen, &a->menu, 0, 0);
-    }
-
+    handle_input(a, dt);
     on_loop_gui(a);
+
+    switch (a->state) {
+    case GAME:
+        on_game_loop(a, now, dt);
+        break;
+
+    case MENU:
+        on_menu_loop(a, now, dt);
+        break;
+    
+    default:
+        break;
+    }
 }
 
 static void on_select_map(void* ud) {
@@ -158,33 +210,17 @@ static void on_select_map(void* ud) {
     // Successfully parsed: install map into the app (free previous if owned)
     if (app->owned_map_data) free(app->owned_map_data);
     app->owned_map_data = data;
-    app->map.w = w;
-    app->map.h = h;
-    app->map.data = (const int*)app->owned_map_data; // assign
+    app->game->map.w = w;
+    app->game->map.h = h;
+    app->game->map.data = (const int*)app->owned_map_data; // assign
 
     app->selected_map_index = (int)sel->index;
-    app->state = GAME;
-    // gui_paged_grid_free(&app->gui, &app->grid);
+    switch_to_game(app);
     fprintf(stderr, "Loaded map (%dx%d) from %s\n", w, h, sel->path);
 }
 
-// static const char* basename_no_ext(const char* path) {
-//     const char* base = strrchr(path, '/');
-//     base = base ? base + 1 : path;
-//     const char* dot = strrchr(base, '.');
-//     return (dot && dot > base) ? ( (char[]){0} ) : base; // placeholder to silence warning
-// }
-
-// static const char* label_from_path(const char* path) {
-//     const char* base = strrchr(path, '/');
-//     base = base ? base + 1 : path;
-//     // const char* dot = strrchr(base, '.');
-//     return base;
-// }
-
-static void build_menu_items(App* app) {
-    const char* levels_dir = "assets/maps"; // change to your folder
-    if (map_list_levels(levels_dir, &app->map_files, &app->map_file_count) != 0) {
+static void set_map_files_from_directory(App* app) {
+    if (map_list_levels(LEVELS_DIR, &app->map_files, &app->map_file_count) != 0) {
         app->map_files = NULL;
         app->map_file_count = 0;
     }
@@ -194,8 +230,13 @@ static void build_menu_items(App* app) {
         app->map_ud = (MapSelectUD*)calloc(app->map_file_count, sizeof(MapSelectUD));
         if (!app->map_ud) { app->map_file_count = 0; }
     }
+}
 
-    size_t n = app->map_file_count ? app->map_file_count : 3; // fallback samples
+static void build_menu_items(App* app) {
+    set_map_files_from_directory(app);
+    
+    // If no maps, set demo samples
+    size_t n = app->map_file_count ? app->map_file_count : 3;
     GuiPagedGridItem* items = (GuiPagedGridItem*)calloc(n, sizeof(GuiPagedGridItem));
     if (!items) return;
 
@@ -209,7 +250,7 @@ static void build_menu_items(App* app) {
             const char* path = app->map_files[i];
             const char* base = strrchr(path, '/'); base = base ? base+1 : path;
             const char* dot  = strrchr(base, '.');
-            // Create a temporary cropped label (stack) then strdup inside grid
+            // Create a temporary cropped label (stack) will strdup inside grid
             char label[256];
             if (dot && (size_t)(dot - base) < sizeof(label)) {
                 size_t L = (size_t)(dot - base);
@@ -231,27 +272,24 @@ static void build_menu_items(App* app) {
         }
     }
 
-    gui_paged_grid_set_items(&app->grid, items, n);
-    gui_paged_grid_mount(&app->gui, &app->grid);
+    gui_paged_grid_set_items(&app->menu->grid, items, n);
+    gui_paged_grid_mount(&app->menu->gui, &app->menu->grid);
     free(items);
 }
 
-static void init_gui(App *app) {
-    app->gui = (GuiContext){ .mlx = app->mlx, .now = 0.0, .paths = NULL, .paths_len = 0 };
-    app->selected_map_index = -1;
-    app->owned_map_data = NULL;
-    app->map_files = NULL;
-    app->map_file_count = 0;
-    app->map_ud = NULL;
+static void init_menu_gui(App *app) {
+    // Initialize gui and app elements
+    app->menu->gui = (GuiContext){ .mlx = app->mlx, .now = 0.0, .paths = NULL, .paths_len = 0 };
+    
 
-    GuiContext *gui_ptr = &app->gui;
+    GuiContext *gui_ptr = &app->menu->gui;
 
     gui_paths_add(gui_ptr, "assets");
 
     // Load skins (reuse item skin for pager unless you have a different one)
-    app->ui_item_skin  = gui_load_png_from_paths(gui_ptr, "button_skin.png");
-    if (!app->ui_item_skin) { fprintf(stderr, "Missing assets/button_skin.png\n"); exit(EXIT_FAILURE); }
-    app->ui_pager_skin = app->ui_item_skin;
+    app->menu->ui_item_skin  = gui_load_png_from_paths(gui_ptr, "button_skin.png");
+    if (!app->menu->ui_item_skin) { fprintf(stderr, "Missing assets/button_skin.png\n"); exit(EXIT_FAILURE); }
+    app->menu->ui_pager_skin = app->menu->ui_item_skin;
 
     GuiNineSlice item_nine  = { .left=8, .right=8, .top=8, .bottom=8, .center_fill=true, .center_color=gui_rgba(200,200,200,255) };
     GuiNineSlice pager_nine = { .left=8, .right=8, .top=8, .bottom=8, .center_fill=true,  .center_color=gui_rgba(0,0,0,255) };
@@ -260,10 +298,10 @@ static void init_gui(App *app) {
         .x = 0, .y = 0, .w = 640, .h = 420,
         .center_h = true, .center_v = true,
         .cols = 2, .rows = 2, .gap = 16, .pager_h = 20,
-        .item_skin_tex = app->ui_item_skin, .item_skin_cfg = item_nine,
-        .pager_skin_tex = app->ui_pager_skin, .pager_skin_cfg = pager_nine,
+        .item_skin_tex = app->menu->ui_item_skin, .item_skin_cfg = item_nine,
+        .pager_skin_tex = app->menu->ui_pager_skin, .pager_skin_cfg = pager_nine,
     };
-    if (!gui_paged_grid_init(gui_ptr, &app->grid, cfg)) {
+    if (!gui_paged_grid_init(gui_ptr, &app->menu->grid, cfg)) {
         fprintf(stderr, "gui_paged_grid_init failed\n");
         exit(EXIT_FAILURE);
     }
@@ -271,15 +309,21 @@ static void init_gui(App *app) {
     build_menu_items(app);
 }
 
+static void init_gui(App *app) {
+    // MENU
+    init_menu_gui(app);    
+    // GAME GUI...
+}
+
 static void on_loop_gui(App *app) {
-    gui_begin_frame(&app->gui);
     if (app->state == MENU) {
-        gui_paged_grid_update(&app->gui, &app->grid);
+        gui_begin_frame(&app->menu->gui);
+        gui_paged_grid_update(&app->menu->gui, &app->menu->grid);
     }
 }
 
 static void clean_gui(App *app) {
-    gui_paged_grid_free(&app->gui, &app->grid);
+    gui_paged_grid_free(&app->menu->gui, &app->menu->grid);
 
     // free per-item userdata array
     free(app->map_ud);
@@ -296,36 +340,111 @@ static void clean_gui(App *app) {
         app->owned_map_data = NULL;
     }
 
-    if (app->ui_item_skin)  mlx_delete_texture(app->ui_item_skin);
-    if (app->ui_pager_skin && app->ui_pager_skin != app->ui_item_skin)
-        mlx_delete_texture(app->ui_pager_skin);
+    if (app->menu->ui_item_skin)  mlx_delete_texture(app->menu->ui_item_skin);
+    if (app->menu->ui_pager_skin && app->menu->ui_pager_skin != app->menu->ui_item_skin)
+        mlx_delete_texture(app->menu->ui_pager_skin);
 }
 
+static void on_menu_resize(int32_t w, int32_t h, App* app) {
+    canvas_destroy(&app->menu->scene);
+    canvas_destroy(&app->menu->screen);
+    
+    canvas_init(&app->menu->screen, app->mlx, w, h);
+    canvas_init(&app->menu->scene, app->mlx, w, h);
+    menu_bg_resize(&app->menu->menu_bg, (int)w, (int)h);
+    
+    if (app->state != MENU) return ;
 
-static void init_menu_bg(App* app) {
-    // Use the actual canvas size in case it differs from WIDTH/HEIGHT
-    int w = (int)app->mlx->width;
-    int h = (int)app->mlx->height;
-    if (!menu_bg_init(&app->menu_bg, w, h, 0xC0FFEEu)) {
-        fprintf(stderr, "menu_bg_init failed\n");
+    if (mlx_image_to_window(app->mlx, app->menu->screen.img, 0, 0) < 0) {
+        puts(mlx_strerror(mlx_errno));
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void on_game_resize(int32_t w, int32_t h, App* app) {
+    canvas_destroy(&app->game->scene);
+    canvas_destroy(&app->game->screen);
+    
+    canvas_init(&app->game->screen, app->mlx, w, h);
+    canvas_init(&app->game->scene, app->mlx, w, h);
+    
+    if (app->state != GAME) return ;
+
+    if (mlx_image_to_window(app->mlx, app->game->screen.img, 0, 0) < 0) {
+        puts(mlx_strerror(mlx_errno));
         exit(EXIT_FAILURE);
     }
 }
 
 static void on_resize(int32_t w, int32_t h, void* param) {
     App* app = (App*)param;
-    canvas_destroy(&app->scene);
-    canvas_destroy(&app->menu);
-    canvas_destroy(&app->screen);
-    
-    canvas_init(&app->screen, app->mlx, w, h);
-    canvas_init(&app->scene, app->mlx, w, h);
-    canvas_init(&app->menu, app->mlx, w, h);
-    if (mlx_image_to_window(app->mlx, app->screen.img, 0, 0) < 0) {
+    on_menu_resize(w, h, app);
+    on_game_resize(w, h, app);
+}
+
+static void init_menu_bg(App* app) {
+    int w = (int)app->mlx->width;
+    int h = (int)app->mlx->height;
+    if (!menu_bg_init(&app->menu->menu_bg, w, h, 0xC0FFEEu)) {
+        fprintf(stderr, "menu_bg_init failed\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void init_canvases(App* app) {
+    if (canvas_init(&app->game->screen,  app->mlx, WIDTH, HEIGHT) ||
+        canvas_init(&app->game->scene,   app->mlx, WIDTH, HEIGHT) ||
+        canvas_init(&app->game->minimap, app->mlx, app->game->map.w * 6, app->game->map.h * 6) ||
+        canvas_init(&app->menu->screen,   app->mlx, WIDTH, HEIGHT) ||
+        canvas_init(&app->menu->scene,   app->mlx, WIDTH, HEIGHT))
+    {
         puts(mlx_strerror(mlx_errno));
         exit(EXIT_FAILURE);
     }
-    menu_bg_resize(&app->menu_bg, (int)w, (int)h);
+}
+
+// State switching
+static void img_set_enabled(mlx_image_t* img, bool en) {
+    if (!img) return;
+    for (size_t i = 0; i < img->count; ++i) img->instances[i].enabled = en;
+}
+
+static void ensure_canvas_attached(mlx_t* mlx, Canvas* c, int x, int y) {
+    if (!c || !c->img) return;
+    if (c->img->count == 0) {
+        if (mlx_image_to_window(mlx, c->img, x, y) < 0) {
+            puts(mlx_strerror(mlx_errno));
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+static void switch_to_game(App* a) {
+    // 1) Remove menu GUI from the window so nothing overlays the game
+    gui_paged_grid_free(&a->menu->gui, &a->menu->grid);
+
+    // 2) Hide menu screen, show game screen
+    if (a->menu->screen.img && a->menu->screen.img->count > 0)
+        img_set_enabled(a->menu->screen.img, false);
+
+    ensure_canvas_attached(a->mlx, &a->game->screen, 0, 0);
+    img_set_enabled(a->game->screen.img, true);
+
+    a->state = GAME;
+}
+
+static void switch_to_menu(App* a) {
+    // 1) Hide game screen, show (or attach) menu screen
+    if (a->game->screen.img && a->game->screen.img->count > 0)
+        img_set_enabled(a->game->screen.img, false);
+
+    ensure_canvas_attached(a->mlx, &a->menu->screen, 0, 0);
+    img_set_enabled(a->menu->screen.img, true);
+
+    // 2) (Re)build menu GUI so buttons/pager are visible in this state
+    init_menu_gui(a);              // safe: we freed it when entering GAME
+    init_menu_bg(a);               // keep your animated bg up-to-date
+    a->state = MENU;
 }
 
 int main(void) {
@@ -335,33 +454,40 @@ int main(void) {
 
     /* App context */
     App app = {0};
+
+    app.game = (Game*)malloc(sizeof(Game) * 1);
+    if (!app.game)
+        return EXIT_FAILURE;
+    app.menu = (Menu*)malloc(sizeof(Menu) * 1);
+    if (!app.menu)
+        return EXIT_FAILURE;
+
     app.mlx = mlx;
+    app.selected_map_index = -1;
+    app.owned_map_data = NULL;
+    app.map_files = NULL;
+    app.map_file_count = 0;
+    app.map_ud = NULL;
 
     /* World map */
-    app.map.w = WORLD_W;
-    app.map.h = WORLD_H;
+    app.game->map.w = WORLD_W;
+    app.game->map.h = WORLD_H;
     /* If your compiler rejects WORLD_DATA aliasing, replace with: extern const int world_template[]; app.map.data = world_template; */
     extern const int WORLD_DATA[];
-    app.map.data = WORLD_DATA;
+    app.game->map.data = WORLD_DATA;
 
     /* Cameras: starting pos in open space, FOV ~ 66° => |plane| ≈ tan(33°) ≈ 0.65 */
-    app.cam.pos   = (Vec2f){ 12.0f, 12.0f };
-    app.cam.dir   = (Vec2f){ -1.0f, 0.0f };
-    app.cam.plane = (Vec2f){ 0.0f, 0.66f };
+    app.game->cam.pos   = (Vec2f){ 12.0f, 12.0f };
+    app.game->cam.dir   = (Vec2f){ -1.0f, 0.0f };
+    app.game->cam.plane = (Vec2f){ 0.0f, 0.66f };
+
+    /* Start the game on the menu */
     app.state     = MENU;
 
-    /* Canvases */
-    if (canvas_init(&app.screen,  mlx, WIDTH, HEIGHT) ||
-        canvas_init(&app.scene,   mlx, WIDTH, HEIGHT) ||
-        canvas_init(&app.minimap, mlx, app.map.w * 6, app.map.h * 6) ||
-        canvas_init(&app.menu, mlx, WIDTH, HEIGHT))
-    {
-        puts(mlx_strerror(mlx_errno));
-        return EXIT_FAILURE;
-    }
+    init_canvases(&app);
 
     /* Only the screen is shown */
-    if (mlx_image_to_window(mlx, app.screen.img, 0, 0) < 0) {
+    if (mlx_image_to_window(mlx, app.menu->screen.img, 0, 0) < 0) {
         puts(mlx_strerror(mlx_errno));
         return EXIT_FAILURE;
     }
@@ -384,12 +510,15 @@ int main(void) {
     mlx_loop(mlx);
 #endif
 
-    menu_bg_free(&app.menu_bg);
+    menu_bg_free(&app.menu->menu_bg);
     clean_gui(&app);
-    canvas_destroy(&app.menu);
-    canvas_destroy(&app.minimap);
-    canvas_destroy(&app.scene);
-    canvas_destroy(&app.screen);
+    canvas_destroy(&app.menu->screen);
+    canvas_destroy(&app.menu->scene);
+    canvas_destroy(&app.game->minimap);
+    canvas_destroy(&app.game->scene);
+    canvas_destroy(&app.game->screen);
+    free(app.menu);
+    free(app.game);
     mlx_terminate(mlx);
     return EXIT_SUCCESS;
 }
