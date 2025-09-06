@@ -8,6 +8,12 @@ typedef struct { int   x, y; } Point2i;
 
 typedef struct { uint8_t r, g, b, a; } Color;
 
+typedef struct {
+    Vec2f pos;   /* world coords in tiles */
+    Vec2f dir;   /* normalized view direction */
+    Vec2f plane; /* camera plane: controls FOV (≈ 66° if |plane|=tan(fov/2)) */
+} Camera;
+
 static inline Color rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     Color c = { r, g, b, a }; return c;
 }

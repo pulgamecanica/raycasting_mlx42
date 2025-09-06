@@ -284,3 +284,32 @@ void gui_paged_grid_free(GuiContext* ctx, GuiPagedGrid* g) {
 
     g->mounted = false;
 }
+
+static void pg_img_set_enabled(mlx_image_t* img, bool en) {
+    if (!img) return;
+    for (size_t i = 0; i < img->count; ++i) {
+        img->instances[i].enabled = en;
+    }
+}
+
+void gui_paged_grid_set_enabled(GuiPagedGrid* g, bool en) {
+    if (!g) return;
+
+    // Item buttons (current page slots = per_page)
+    if (g->item_btns) {
+        for (size_t i = 0; i < g->per_page; ++i) {
+            GuiButton* b = &g->item_btns[i];
+            pg_img_set_enabled(b->skin_img,  en);
+            pg_img_set_enabled(b->label_img, en);
+        }
+    }
+
+    // Pager buttons
+    pg_img_set_enabled(g->btn_prev.skin_img,  en);
+    pg_img_set_enabled(g->btn_prev.label_img, en);
+    pg_img_set_enabled(g->btn_next.skin_img,  en);
+    pg_img_set_enabled(g->btn_next.label_img, en);
+
+    // Pager label ("1 / N")
+    pg_img_set_enabled(g->page_label_img, en);
+}

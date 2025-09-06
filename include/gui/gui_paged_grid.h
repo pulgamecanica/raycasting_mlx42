@@ -64,6 +64,7 @@ void gui_paged_grid_set_items(GuiPagedGrid* g, const GuiPagedGridItem* items, si
 void gui_paged_grid_mount(GuiContext* ctx, GuiPagedGrid* g);
 void gui_paged_grid_update(GuiContext* ctx, GuiPagedGrid* g);
 void gui_paged_grid_free(GuiContext* ctx, GuiPagedGrid* g);
+void gui_paged_grid_set_enabled(GuiPagedGrid* g, bool en);
 
 
 #endif // GUI_PAGED_GRID_H

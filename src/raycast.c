@@ -68,6 +68,7 @@ void render_scene(Canvas* scene, const GridMap* map, const Camera* cam) {
     }
 }
 
+#include <stdio.h>
 void draw_minimap(Canvas* mini, const GridMap* map, const Camera* cam, int scale) {
     canvas_clear(mini, rgba(0,0,0,255));
     /* walls */
