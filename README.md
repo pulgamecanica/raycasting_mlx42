@@ -1,3 +1,11 @@
+| | Demo | Link | |
+|-| ---- | ---- |-|
+| | Basic Ray casting | https://pulgamecanica.github.io/raycasting_mlx42/web/1/demo.html | |
+| | GUI (figures, animations, buttons) | https://pulgamecanica.github.io/raycasting_mlx42/web/2/demo.html | |
+| | Advanced GUI (Grid) | https://pulgamecanica.github.io/raycasting_mlx42/web/3demo.html | |
+| | State management (menu, game) with GUI | https://pulgamecanica.github.io/raycasting_mlx42/web/4/demo.html | |
+
+
 # 🚀 MLX42 Web & Native Template
 
 This repository is a **starter template** for projects using [MLX42](https://github.com/codam-coding-college/MLX42).  
